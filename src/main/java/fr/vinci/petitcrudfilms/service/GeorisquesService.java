@@ -12,7 +12,11 @@ public class GeorisquesService {
 
     private final RestClient restClient;
 
-    public GeorisquesService(RestClient.Builder restClientBuilder) {
+    public GeorisquesService() {
+        this(RestClient.builder());
+    }
+
+    GeorisquesService(RestClient.Builder restClientBuilder) {
         this.restClient = restClientBuilder
                 .baseUrl("https://georisques.gouv.fr/api/v1")
                 .build();
