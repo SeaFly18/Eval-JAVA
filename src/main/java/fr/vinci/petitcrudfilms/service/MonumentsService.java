@@ -8,6 +8,10 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,7 +41,7 @@ public class MonumentsService {
 
         List<Monument> monuments = new ArrayList<>();
         for (JsonNode row : rows) {
-            double[] coords = parseCoords(row.path("coordonnees_au_format_WGS84").asText(null));
+            double[] coords = parseCoords(row.path("coordonnees_au_format_WGS84").asString(null));
             if (coords == null) {
                 continue;
             }
@@ -65,14 +69,14 @@ public class MonumentsService {
         }
 
         JsonNode props = features.get(0).path("properties");
-        String citycode = props.path("citycode").asText("");
+        String citycode = props.path("citycode").asString("");
         String dept = citycode.startsWith("97")
                 ? citycode.substring(0, Math.min(3, citycode.length()))
                 : citycode.substring(0, Math.min(2, citycode.length()));
 
         return new Localisation(
-                props.path("label").asText(""),
-                props.path("city").asText(""),
+                props.path("label").asString(""),
+                props.path("city").asString(""),
                 dept);
     }
 
@@ -85,43 +89,97 @@ public class MonumentsService {
     }
 
     private List<JsonNode> fetchAll(String dept) {
+        String base = TABULAR + "?Departement_format_numerique__exact=" + dept + "&page_size=100";
+
+        JsonNode first = fetchPage(base);
+        if (first == null) {
+            return List.of();
+        }
+
         List<JsonNode> rows = new ArrayList<>();
-        String url = TABULAR + "?Departement_format_numerique__exact=" + dept + "&page_size=100";
+        for (JsonNode row : first.path("data")) {
+            rows.add(row);
+        }
 
-        while (url != null) {
-            String current = url;
-            JsonNode page = restClient.get()
-                    .uri(uriBuilder -> URI.create(current))
-                    .retrieve()
-                    .body(JsonNode.class);
+        int total = first.path("meta").path("total").asInt(0);
+        int pages = (int) Math.ceil(total / 100.0);
+        if (pages <= 1) {
+            return rows;
+        }
 
-            if (page == null) {
-                break;
+        try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<List<JsonNode>>> futures = new ArrayList<>();
+            for (int page = 2; page <= pages; page++) {
+                String url = base + "&page=" + page;
+                futures.add(pool.submit(() -> {
+                    List<JsonNode> pageRows = new ArrayList<>();
+                    JsonNode node = fetchPage(url);
+                    if (node != null) {
+                        for (JsonNode row : node.path("data")) {
+                            pageRows.add(row);
+                        }
+                    }
+                    return pageRows;
+                }));
             }
-            for (JsonNode row : page.path("data")) {
-                rows.add(row);
+            for (Future<List<JsonNode>> future : futures) {
+                rows.addAll(future.get());
             }
-            JsonNode next = page.path("links").path("next");
-            url = next.isMissingNode() || next.isNull() ? null : next.asText(null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interruption lors du chargement des monuments", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            throw new IllegalStateException("Erreur lors du chargement des monuments",
+                    cause == null ? e : cause);
         }
         return rows;
+    }
+
+    private JsonNode fetchPage(String url) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                JsonNode node = restClient.get()
+                        .uri(uriBuilder -> URI.create(url))
+                        .retrieve()
+                        .body(JsonNode.class);
+                if (node != null && node.path("data").isArray()) {
+                    return node;
+                }
+                last = new IllegalStateException("Réponse tabular invalide pour " + url);
+            } catch (RuntimeException e) {
+                last = e;
+            }
+            sleep(300L * attempt);
+        }
+        throw last;
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interruption pendant l'attente d'un nouvel essai", e);
+        }
     }
 
     private Monument toMonument(JsonNode row, double distance) {
         return new Monument(
                 titre(row),
-                row.path("Adresse_forme_editoriale").asText(null),
-                row.path("Commune_forme_editoriale").asText(null),
-                row.path("Nature_de_la_protection").asText(null),
-                row.path("Reference").asText(null),
+                row.path("Adresse_forme_editoriale").asString(null),
+                row.path("Commune_forme_editoriale").asString(null),
+                row.path("Nature_de_la_protection").asString(null),
+                row.path("Reference").asString(null),
                 distance,
-                POP_NOTICE + row.path("Reference").asText(""));
+                POP_NOTICE + row.path("Reference").asString(""));
     }
 
     private String titre(JsonNode row) {
         for (String key : List.of("Titre_editorial_de_la_notice",
                 "Denomination_de_l_edifice", "Autre_appellation_de_l_edifice")) {
-            String value = row.path(key).asText(null);
+            String value = row.path(key).asString(null);
             if (value != null && !value.isBlank()) {
                 return value;
             }

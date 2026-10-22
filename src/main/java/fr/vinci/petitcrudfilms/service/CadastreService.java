@@ -58,10 +58,10 @@ public class CadastreService {
     }
 
     private String requiredText(JsonNode value, String field) {
-        if (value.isMissingNode() || value.isNull() || value.asText().isBlank()) {
+        if (value.isMissingNode() || value.isNull() || value.asString().isBlank()) {
             throw new IllegalStateException("Champ absent dans la réponse Cadastre : " + field);
         }
-        return value.asText();
+        return value.asString();
     }
 
     public record CadastreResponse(List<Parcelle> parcelles) {

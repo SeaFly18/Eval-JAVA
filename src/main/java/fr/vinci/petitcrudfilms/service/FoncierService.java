@@ -75,13 +75,13 @@ public class FoncierService {
         }
 
         JsonNode props = features.get(0).path("properties");
-        String code = props.path("citycode").asText("");
+        String code = props.path("citycode").asString("");
         String dept = code.startsWith("97")
                 ? code.substring(0, Math.min(3, code.length()))
                 : code.substring(0, Math.min(2, code.length()));
 
-        return new Localisation(props.path("label").asText(""),
-                props.path("city").asText(""), code, dept);
+        return new Localisation(props.path("label").asString(""),
+                props.path("city").asString(""), code, dept);
     }
 
     private List<Map<String, String>> fetchYear(String code, String dept, int year) {
