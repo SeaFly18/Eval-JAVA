@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>fr.vinci</groupId>
-    <artifactId>PetitCRUDFilms</artifactId>
+    <artifactId>infos-adresse</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>PetitCRUDFilms</name>
-    <description>PetitCRUDFilms</description>
+    <name>InfosAdresse</name>
+    <description>API fournissant des informations liées à une adresse</description>
     <url/>
     <licenses>
         <license/>
