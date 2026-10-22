@@ -1,18 +1,22 @@
 # InfosAdresse
 
 API REST qui agrège, à partir d'une simple adresse, des informations publiques :
-géocodage, risques naturels et technologiques (Géorisques) et monuments
-historiques à proximité (base Mérimée).
+géocodage, risques naturels et technologiques (Géorisques), monuments
+historiques à proximité (base Mérimée), parcelles cadastrales (API Carto IGN)
+et ventes immobilières récentes (DVF).
 
 ## Principe
 
 ```
-adresse ──▶ Géocodage (coordonnées) ──┬──▶ Géorisques (risques)      ──┐
-                                       └──▶ Monuments (base Mérimée)  ──┴──▶ réponse agrégée
+adresse ──▶ Géocodage (coordonnées) ──┬──▶ Géorisques (risques)            ──┐
+                                       ├──▶ Monuments (base Mérimée)        ──┤
+                                       ├──▶ Cadastre (parcelles, API Carto) ──┼──▶ réponse agrégée
+                                       └──▶ Foncier (ventes DVF)            ──┘
 ```
 
-Les appels Géorisques et Monuments s'exécutent **en parallèle** (threads virtuels),
-tout comme la pagination de la base Mérimée.
+Les quatre services métier s'exécutent **en parallèle** (threads virtuels),
+tout comme la pagination de la base Mérimée et le téléchargement des fichiers
+DVF annuels côté Foncier.
 
 ## Prérequis
 
@@ -55,17 +59,19 @@ Une fois l'application démarrée :
 
 ### `GET /infos/{adresse}`
 
-Endpoint principal : géocode l'adresse puis agrège risques + monuments.
+Endpoint principal (et unique) : géocode l'adresse puis agrège, en parallèle,
+risques + monuments + cadastre + ventes foncières.
 
 | Paramètre      | Type   | Défaut | Description                              |
 |----------------|--------|--------|------------------------------------------|
 | `adresse`      | path   | —      | Adresse en texte libre                   |
 | `nbMonuments`  | query  | `5`    | Nombre de monuments les plus proches     |
+| `nbVentes`     | query  | `5`    | Nombre de ventes immobilières proches    |
 
 Exemple :
 
 ```bash
-curl "http://localhost:8080/infos/88%20rue%20abel%20gance?nbMonuments=5"
+curl "http://localhost:8080/infos/88%20rue%20abel%20gance?nbMonuments=5&nbVentes=5"
 ```
 
 Réponse (extrait) :
@@ -101,32 +107,48 @@ Réponse (extrait) :
         "urlNotice": "https://www.pop.culture.gouv.fr/notice/merimee/PA00080199"
       }
     ]
+  },
+  "cadastre": {
+    "parcelles": [
+      {
+        "idu": "95572000AI0123",
+        "section": "AI",
+        "numero": "0123",
+        "commune": "Saint-Ouen-l'Aumône",
+        "contenance": 512
+      }
+    ]
+  },
+  "ventes": {
+    "adresse": "88 Rue Abel Gance 95310 Saint-Ouen-l'Aumône",
+    "commune": "Saint-Ouen-l'Aumône",
+    "codeInsee": "95572",
+    "ventes": [
+      {
+        "date": "2024-05-14",
+        "nature": "Vente",
+        "valeur": 285000,
+        "types": "Maison",
+        "surfaceBati": 95,
+        "prixM2": 3000,
+        "distanceMetres": 142.8
+      }
+    ]
   }
 }
 ```
 
-### `GET /adresse/{adresse}`
-
-Renvoie uniquement le résultat brut du géocodage (coordonnées).
-
-```bash
-curl "http://localhost:8080/adresse/88%20rue%20abel%20gance"
-```
-
 ## Sources de données
+
+Les services métier sont tous agrégés par `GET /infos/{adresse}` :
 
 | Service                | API externe                                                        |
 |------------------------|--------------------------------------------------------------------|
 | Géocodage              | `https://data.geopf.fr/geocodage` (`/search`, `/reverse`)          |
 | Géorisques             | `https://georisques.gouv.fr/api/v1/resultats_rapport_risque`       |
 | Monuments (Mérimée)    | `https://tabular-api.data.gouv.fr` (jeu de données POP Culture)    |
-
-Services supplémentaires présents dans le code mais **non exposés** par un contrôleur :
-
-| Service    | API externe                                   |
-|------------|-----------------------------------------------|
-| Cadastre   | `https://apicarto.ign.fr/api/cadastre`        |
-| Foncier    | `https://files.data.gouv.fr` (DVF)            |
+| Cadastre               | `https://apicarto.ign.fr/api/cadastre`                             |
+| Foncier (DVF)          | `https://files.data.gouv.fr` (fichiers DVF annuels par commune)    |
 
 ## Robustesse réseau
 
@@ -136,7 +158,9 @@ Pour y faire face :
 - le client HTTP est forcé en **HTTP/1.1** (`RestClientConfig`) ;
 - l'appel Géorisques est **réessayé** (jusqu'à 8 tentatives, backoff) avec un
   en-tête `Accept-Encoding: identity` pour éviter les erreurs de décompression ;
-- la pagination Mérimée réessaie chaque page (timeouts transitoires de l'API tabular).
+- la pagination Mérimée réessaie chaque page (timeouts transitoires de l'API tabular) ;
+- côté Foncier, les fichiers DVF des dernières années sont téléchargés **en
+  parallèle** (threads virtuels) pour limiter le temps de réponse.
 
 ## Structure
 
@@ -145,8 +169,7 @@ src/main/java/fr/vinci/petitcrudfilms/
 ├── CrudApplication.java          # point d'entrée Spring Boot
 ├── RestClientConfig.java         # RestClient.Builder (HTTP/1.1)
 ├── controller/
-│   ├── AppController.java        # GET /infos/{adresse} (agrégation)
-│   └── GeocodageController.java  # GET /adresse/{adresse}
+│   └── AppController.java        # GET /infos/{adresse} (agrégation)
 ├── entity/                       # modèles de géocodage
 └── service/
     ├── GeocodageService.java
