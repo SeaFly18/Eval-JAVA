@@ -1,10 +1,10 @@
-package fr.vinci.petitcrudfilms;
+package fr.vinci.petitcrud;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class PetitCrudFilmsApplicationTests {
+class ApplicationTests {
 
     @Test
     void contextLoads() {
