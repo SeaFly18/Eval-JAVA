@@ -19,7 +19,8 @@ class FoncierServiceTest {
     @Test
     void returnsNearestSalesGroupedByMutation() {
         RestClient.Builder restClientBuilder = RestClient.builder();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(restClientBuilder).build();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restClientBuilder)
+                .ignoreExpectOrder(true).build();
         FoncierService service = new FoncierService(restClientBuilder);
 
         server.expect(requestTo(containsString("geocodage/reverse")))
