@@ -1,7 +1,9 @@
 package fr.vinci.petitcrudfilms.service;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.ResourceAccessException;
 import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
@@ -10,26 +12,21 @@ import java.util.List;
 @Service
 public class GeorisquesService {
 
+    private static final int MAX_ATTEMPTS = 8;
+    private static final long RETRY_DELAY_MS = 500;
+
     private final RestClient restClient;
 
-    public GeorisquesService() {
-        this(RestClient.builder());
-    }
-
-    GeorisquesService(RestClient.Builder restClientBuilder) {
+    public GeorisquesService(RestClient.Builder restClientBuilder) {
         this.restClient = restClientBuilder
                 .baseUrl("https://georisques.gouv.fr/api/v1")
+                .defaultHeader(HttpHeaders.USER_AGENT, "infos-adresse")
+                .defaultHeader(HttpHeaders.ACCEPT_ENCODING, "identity")
                 .build();
     }
 
     public GeorisquesResponse getRisques(double lat, double lon) {
-        JsonNode response = restClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/resultats_rapport_risque")
-                        .queryParam("latlon", lon + "," + lat)
-                        .build())
-                .retrieve()
-                .body(JsonNode.class);
+        JsonNode response = fetchRisques(lat, lon);
 
         if (response == null) {
             throw new IllegalStateException("La réponse de Géorisques est vide");
@@ -39,6 +36,35 @@ public class GeorisquesService {
         String commune = requiredText(response.path("commune").path("libelle"), "commune.libelle");
 
         return new GeorisquesResponse(adresse, commune, extractRisques(response));
+    }
+
+    private JsonNode fetchRisques(double lat, double lon) {
+        ResourceAccessException last = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                return restClient.get()
+                        .uri(uriBuilder -> uriBuilder
+                                .path("/resultats_rapport_risque")
+                                .queryParam("latlon", lon + "," + lat)
+                                .build())
+                        .retrieve()
+                        .body(JsonNode.class);
+            } catch (ResourceAccessException e) {
+                last = e;
+                sleep(RETRY_DELAY_MS);
+            }
+        }
+        throw new IllegalStateException(
+                "Géorisques injoignable après " + MAX_ATTEMPTS + " tentatives", last);
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interruption pendant l'attente d'un nouvel essai", e);
+        }
     }
 
     private List<RisquePrincipal> extractRisques(JsonNode response) {
@@ -59,18 +85,18 @@ public class GeorisquesService {
                 risques.add(new RisquePrincipal(
                         type,
                         requiredText(risque.path("libelle"), "libelle du risque"),
-                        risque.path("libelleStatutCommune").asText(null),
-                        risque.path("libelleStatutAdresse").asText(null)
+                        risque.path("libelleStatutCommune").asString(null),
+                        risque.path("libelleStatutAdresse").asString(null)
                 ));
             }
         });
     }
 
     private String requiredText(JsonNode value, String field) {
-        if (value.isMissingNode() || value.isNull() || value.asText().isBlank()) {
+        if (value.isMissingNode() || value.isNull() || value.asString().isBlank()) {
             throw new IllegalStateException("Champ absent dans la réponse Géorisques : " + field);
         }
-        return value.asText();
+        return value.asString();
     }
 
     public record GeorisquesResponse(String adresse, String commune, List<RisquePrincipal> risquesPrincipaux) {
