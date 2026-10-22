@@ -41,31 +41,11 @@ public class AppController {
         this.monumentsService = monumentsService;
     }
 
-    @GetMapping("/cadastre/{adresse}")
-    public ResponseEntity<CadastreService.CadastreResponse> getCadastre(@PathVariable String adresse) {
-        GeocodageResult result = geocodageService.getAdresse(adresse);
-        Double[] coordinates = result.features[0].geometry.coordinates;
-        CadastreService.CadastreResponse cadastreRes = cadastreService.getParcelles(coordinates[1], coordinates[0]);
-        System.out.println(coordinates[0]);
-        System.out.println(coordinates[1]);
-
-        return ResponseEntity.ok(cadastreRes);
-    }
-
-    @GetMapping("/foncier/{adresse}")
-    public ResponseEntity<FoncierService.FoncierResponse> getFoncier(
-            @PathVariable String adresse,
-            @RequestParam Integer occurrencies
-    ) {
-        Double[] coords = geocodageService.getAdresse(adresse).features[0].geometry.coordinates;
-        FoncierService.FoncierResponse res = foncierService.getVentesProches(coords[1], coords[0], occurrencies);
-        return ResponseEntity.ok().body(res);
-    }
-
     @GetMapping("/infos/{adresse}")
     public ResponseEntity<InfosResponse> getInfos(
             @PathVariable String adresse,
-            @RequestParam(defaultValue = "5") int nbMonuments) {
+            @RequestParam(defaultValue = "5") int nbMonuments,
+            @RequestParam(defaultValue = "5") int nbVentes) {
 
         GeocodageResult geocodage = geocodageService.getAdresse(adresse);
         Double[] coordinates = geocodage.features[0].geometry.coordinates;
@@ -78,13 +58,20 @@ public class AppController {
             CompletableFuture<MonumentsResponse> monumentsFuture =
                     CompletableFuture.supplyAsync(
                             () -> monumentsService.getMonumentsProches(lat, lon, nbMonuments), pool);
+            CompletableFuture<CadastreService.CadastreResponse> cadastreFuture =
+                    CompletableFuture.supplyAsync(() -> cadastreService.getParcelles(lat, lon), pool);
+            CompletableFuture<FoncierService.FoncierResponse> ventesFuture =
+                    CompletableFuture.supplyAsync(
+                            () -> foncierService.getVentesProches(lat, lon, nbVentes), pool);
 
             GeorisquesResponse risques = risquesFuture.join();
             MonumentsResponse monuments = monumentsFuture.join();
+            CadastreService.CadastreResponse cadastre = cadastreFuture.join();
+            FoncierService.FoncierResponse ventes = ventesFuture.join();
 
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(new InfosResponse(adresse, lat, lon, risques, monuments));
+                    .body(new InfosResponse(adresse, lat, lon, risques, monuments, cadastre, ventes));
         } catch (CompletionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof RuntimeException runtime) {
@@ -99,7 +86,9 @@ public class AppController {
             double latitude,
             double longitude,
             GeorisquesResponse risques,
-            MonumentsResponse monuments
+            MonumentsResponse monuments,
+            CadastreService.CadastreResponse cadastre,
+            FoncierService.FoncierResponse ventes
     ) {
     }
 }

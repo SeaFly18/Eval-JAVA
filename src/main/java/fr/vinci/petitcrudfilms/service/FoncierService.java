@@ -15,6 +15,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class FoncierService {
@@ -36,10 +39,18 @@ public class FoncierService {
 
         List<Map<String, String>> rows = new ArrayList<>();
         int thisYear = Year.now().getValue();
-        for (int year = thisYear; year > thisYear - ANNEES; year--) {
-            List<Map<String, String>> data = fetchYear(loc.code(), loc.departement(), year);
-            if (data != null) {
-                rows.addAll(data);
+        try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<CompletableFuture<List<Map<String, String>>>> futures = new ArrayList<>();
+            for (int year = thisYear; year > thisYear - ANNEES; year--) {
+                int y = year;
+                futures.add(CompletableFuture.supplyAsync(
+                        () -> fetchYear(loc.code(), loc.departement(), y), pool));
+            }
+            for (CompletableFuture<List<Map<String, String>>> future : futures) {
+                List<Map<String, String>> data = future.join();
+                if (data != null) {
+                    rows.addAll(data);
+                }
             }
         }
         if (rows.isEmpty()) {
