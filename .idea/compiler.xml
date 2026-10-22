@@ -10,9 +10,6 @@
         <module name="infos-adresse" />
       </profile>
     </annotationProcessing>
-    <bytecodeTargetLevel>
-      <module name="PetitCRUDFilms" target="25" />
-    </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
